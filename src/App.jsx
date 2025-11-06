@@ -7,28 +7,76 @@ const CELL = 1
 const HALF = (SIZE - 1) * 0.5 * CELL
 
 function useBoard() {
-  const [turn, setTurn] = useState(0) // 0 = red, 1 = yellow
-  const [board, setBoard] = useState(() =>
-    Array.from({ length: SIZE }, () =>
+  function createEmptyBoard() {
+    return Array.from({ length: SIZE }, () =>
       Array.from({ length: SIZE }, () => Array(SIZE).fill(-1))
     )
-  )
+  }
+
+  const [turn, setTurn] = useState(0) // 0 = red, 1 = yellow
+  const [winner, setWinner] = useState(null) // null | 0 | 1
+  const [board, setBoard] = useState(createEmptyBoard)
+
+  function hasFourInARow(b, x, y, z, player) {
+    const directions = [
+      [1, 0, 0], [0, 1, 0], [0, 0, 1],
+      [1, 1, 0], [1, -1, 0], [1, 0, 1], [1, 0, -1], [0, 1, 1], [0, 1, -1],
+      [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
+    ]
+
+    function inBounds(ix, iy, iz) {
+      return ix >= 0 && ix < SIZE && iy >= 0 && iy < SIZE && iz >= 0 && iz < SIZE
+    }
+
+    for (const [dx, dy, dz] of directions) {
+      let count = 1
+      for (let step = 1; step < SIZE; step++) {
+        const nx = x + dx * step
+        const ny = y + dy * step
+        const nz = z + dz * step
+        if (!inBounds(nx, ny, nz) || b[nx][ny][nz] !== player) break
+        count++
+      }
+      for (let step = 1; step < SIZE; step++) {
+        const nx = x - dx * step
+        const ny = y - dy * step
+        const nz = z - dz * step
+        if (!inBounds(nx, ny, nz) || b[nx][ny][nz] !== player) break
+        count++
+      }
+      if (count >= 4) return true
+    }
+    return false
+  }
 
   const drop = useCallback((x, y) => {
+    if (winner !== null) return false
     // find lowest empty z
     for (let z = 0; z < SIZE; z++) {
       if (board[x][y][z] === -1) {
+        const player = turn
         const next = board.map(layer => layer.map(col => col.slice()))
-        next[x][y][z] = turn
+        next[x][y][z] = player
+        const didWin = hasFourInARow(next, x, y, z, player)
         setBoard(next)
-        setTurn(t => 1 - t)
+        if (didWin) {
+          setWinner(player)
+        } else {
+          setTurn(t => 1 - t)
+        }
         return true
       }
     }
     return false
-  }, [board, turn])
+  }, [board, turn, winner])
 
-  return { board, turn, drop }
+  const reset = useCallback(() => {
+    setBoard(createEmptyBoard())
+    setTurn(0)
+    setWinner(null)
+  }, [])
+
+  return { board, turn, winner, drop, reset }
 }
 
 function Piece({ x, y, z, player }) {
@@ -41,12 +89,12 @@ function Piece({ x, y, z, player }) {
   )
 }
 
-function Column({ x, y, onDrop }) {
+function Column({ x, y, onDrop, disabled }) {
   // tall, thin, invisible hitbox over the column
   return (
     <mesh
       position={[x * CELL - HALF, SIZE * 0.5, y * CELL - HALF]}
-      onClick={() => onDrop(x, y)}
+      onClick={() => { if (!disabled) onDrop(x, y) }}
     >
       <boxGeometry args={[0.9, SIZE + 0.01, 0.9]} />
       <meshBasicMaterial transparent opacity={0} />
@@ -54,8 +102,7 @@ function Column({ x, y, onDrop }) {
   )
 }
 
-function Board() {
-  const { board, turn, drop } = useBoard()
+function Board({ board, turn, winner, drop }) {
   const columns = useMemo(() => {
     const arr = []
     for (let x = 0; x < SIZE; x++) {
@@ -82,7 +129,7 @@ function Board() {
 
       {/* Hoverable/clickable columns */}
       {columns.map(([x, y]) => (
-        <Column key={`col-${x}-${y}`} x={x} y={y} onDrop={drop} />
+        <Column key={`col-${x}-${y}`} x={x} y={y} onDrop={drop} disabled={winner !== null} />
       ))}
 
       {/* Pieces */}
@@ -113,14 +160,53 @@ function Scene() {
 }
 
 export default function App() {
+  const { board, turn, winner, drop, reset } = useBoard()
   return (
-    <Canvas shadows camera={{ fov: 60 }}>
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[5, 10, 5]} intensity={1} castShadow />
-      <Grid args={[SIZE + 2, SIZE + 2]} cellSize={1} sectionSize={SIZE} infiniteGrid={false} position={[0, -0.1, 0]} />
-      <OrbitControls enablePan={false} enableDamping target={[0, 0.5, 0]} />
-      <Scene />
-      <Board />
-    </Canvas>
+    <div style={{ display: 'grid', gridTemplateRows: 'auto 1fr', height: '100vh', background: '#0a0a0a' }}>
+      <header style={{
+        padding: '12px 16px',
+        textAlign: 'center',
+        color: '#fff',
+        fontFamily: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif',
+        fontSize: 36,
+        fontWeight: 900,
+        letterSpacing: 2,
+        textShadow: '0 4px 12px rgba(0,0,0,0.7)'
+      }}>Connect Four 3D</header>
+      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', minHeight: 0 }}>
+        <aside style={{ padding: 16, color: '#fff', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {winner === null ? (
+            <div style={{ fontSize: 22, fontWeight: 800 }}>
+              {turn === 0 ? '🔴 Red to move' : '🟡 Yellow to move'}
+            </div>
+          ) : (
+            <div style={{ fontSize: 28, fontWeight: 900 }}>
+              {winner === 0 ? '🔴 RED WINS!!' : '🟡 YELLOW WINS!!'}
+            </div>
+          )}
+          <button onClick={reset} style={{
+            padding: '10px 14px',
+            borderRadius: 8,
+            border: 'none',
+            background: '#333',
+            color: '#fff',
+            fontWeight: 700,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            cursor: 'pointer',
+            width: 'fit-content'
+          }}>Reset</button>
+        </aside>
+        <div style={{ position: 'relative', minHeight: 0 }}>
+          <Canvas shadows camera={{ fov: 60 }} style={{ width: '100%', height: '100%' }}>
+            <ambientLight intensity={0.5} />
+            <directionalLight position={[5, 10, 5]} intensity={1} castShadow />
+            <Grid args={[SIZE + 2, SIZE + 2]} cellSize={1} sectionSize={SIZE} infiniteGrid={false} position={[0, -0.1, 0]} />
+            <OrbitControls enablePan={false} enableDamping target={[0, 0.5, 0]} />
+            <Scene />
+            <Board board={board} turn={turn} winner={winner} drop={drop} />
+          </Canvas>
+        </div>
+      </div>
+    </div>
   )
 }
