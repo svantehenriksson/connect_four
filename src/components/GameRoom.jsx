@@ -69,6 +69,33 @@ function useMultiplayerBoard(roomId, playerId, playerRole) {
     }
   }, [roomId])
 
+  function hasFourInARow(b, x, y, z) {
+    const SX = b.length, SY = b[0].length, SZ = b[0][0].length
+    const player = b[x][y][z]
+    if (player === -1) return false
+    const dirs = [
+      [1,0,0],[0,1,0],[0,0,1],
+      [1,1,0],[1,-1,0],[1,0,1],[1,0,-1],[0,1,1],[0,1,-1],
+      [1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],
+    ]
+    const inB = (i,j,k) => i>=0 && i<SX && j>=0 && j<SY && k>=0 && k<SZ
+    for (const [dx,dy,dz] of dirs) {
+      let c = 1
+      for (let s = 1; ; s++) { // forward
+        const nx = x + dx*s, ny = y + dy*s, nz = z + dz*s
+        if (!inB(nx,ny,nz) || b[nx][ny][nz] !== player) break
+        c++
+      }
+      for (let s = 1; ; s++) { // backward
+        const nx = x - dx*s, ny = y - dy*s, nz = z - dz*s
+        if (!inB(nx,ny,nz) || b[nx][ny][nz] !== player) break
+        c++
+      }
+      if (c >= 4) return true
+    }
+    return false
+  }
+
   const drop = useCallback(async (x, y) => {
     // Check if it's my turn
     if (turn !== myTurnNumber) {
@@ -87,15 +114,27 @@ function useMultiplayerBoard(roomId, playerId, playerRole) {
         const next = board.map(layer => layer.map(col => col.slice()))
         next[x][y][z] = turn
 
+        // Compute winner
+        const didWin = hasFourInARow(next, x, y, z)
+
         // Update in Supabase
         try {
+          const update = didWin
+            ? {
+                board: next,
+                status: 'finished',
+                winner: turn === 0 ? 'red' : 'yellow',
+                updated_at: new Date().toISOString(),
+              }
+            : {
+                board: next,
+                current_turn: 1 - turn,
+                updated_at: new Date().toISOString(),
+              }
+
           const { error } = await supabase
             .from('rooms')
-            .update({
-              board: next,
-              current_turn: 1 - turn,
-              updated_at: new Date().toISOString()
-            })
+            .update(update)
             .eq('id', roomId)
 
           if (error) throw error
@@ -311,6 +350,27 @@ export default function GameRoom({ roomId, roomCode, playerId, playerRole, onLea
         <Scene />
         <Board roomId={roomId} playerId={playerId} playerRole={playerRole} />
       </Canvas>
+
+      {roomData && roomData.status === 'finished' && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          pointerEvents: 'none'
+        }}>
+          <div style={{
+            fontFamily: 'system-ui, sans-serif',
+            fontWeight: 900,
+            fontSize: 64,
+            color: '#fff',
+            textShadow: '0 6px 16px rgba(0,0,0,0.7)'
+          }}>
+            {roomData.winner === 'red' ? '🔴 RED WINS!!' : '🟡 YELLOW WINS!!'}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
